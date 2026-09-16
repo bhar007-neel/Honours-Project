@@ -59,11 +59,13 @@ preferred because an IDE-only update may not update ST-LINK drivers and servers.
 
 First validation:
 
-1. Connect the NUCLEO-L552ZE-Q through its ST-LINK USB connector.
-2. Create a project for `NUCLEO-L552ZE-Q`.
-3. Build and flash the generated or board example.
-4. Debug the program and confirm the expected LED behavior.
-5. Record the IDE version, firmware version, and test result in the project log.
+1. Install the `STM32CubeH5` MCU package when STM32CubeIDE requests it.
+2. Connect the NUCLEO-H563ZI through its integrated ST-LINK USB connector.
+3. Create a project for `NUCLEO-H563ZI`.
+4. Build and flash the generated or board LED-toggle example.
+5. Debug the program and confirm the expected LED behavior.
+6. Record the IDE version, STM32CubeH5 version, ST-LINK firmware version, and
+   test result in the project log.
 
 FreeRTOS configuration begins only after the basic build/flash/debug path works.
 

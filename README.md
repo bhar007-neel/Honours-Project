@@ -16,7 +16,7 @@ Build and evaluate a two-node real-time IoT platform:
 
 ```mermaid
 flowchart LR
-    S["STM32 NUCLEO-L552ZE-Q<br/>FreeRTOS sensing node"]
+    S["STM32 NUCLEO-H563ZI<br/>FreeRTOS sensing node"]
     V["Ada / SPARK<br/>formally verified validation"]
     Q["Raspberry Pi 4<br/>QNX 8 supervisory node"]
 
@@ -33,6 +33,18 @@ flowchart LR
 The minimum viable product is a reliable bidirectional link between the STM32 and
 QNX nodes. Formal verification and monitoring are added only after that link is
 stable.
+
+## Target hardware
+
+- STM32 NUCLEO-H563ZI with its integrated ST-LINK debugger/programmer
+- Raspberry Pi 4 Model B with a 32 GB or larger microSD card
+- Five-port Gigabit Ethernet switch and three to four Ethernet cables
+- USB-to-serial/UART adapter and male-to-female jumper wires
+- Breadboard, LEDs, resistors, and other basic test components
+
+The STM32H563ZI is an Arm Cortex-M33 MCU with TrustZone, 2 MB of flash, 640 KB of
+RAM, and a maximum 250 MHz clock. The project uses STM32CubeH5 support rather
+than the STM32L5 package named in the original planning guide.
 
 ## Planned repository layout
 
