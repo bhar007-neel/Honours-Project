@@ -1,0 +1,72 @@
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.key
+*.pem
+*.p12
+
+# Editors and operating systems
+.vscode/
+.idea/
+.cursor/
+*.code-workspace
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Logs, reports, and temporary files
+*.log
+*.tmp
+*.temp
+*.bak
+*.swp
+coverage/
+
+# Native build outputs
+build/
+out/
+dist/
+bin/
+obj/
+Debug/
+Release/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+compile_commands.json
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dll
+*.exe
+*.elf
+*.hex
+*.bin
+*.map
+
+# STM32CubeIDE / Eclipse local metadata and generated output
+.metadata/
+.settings/
+RemoteSystemsTempFiles/
+
+# Ada / Alire generated state
+alire/
+.alire/
+obj/
+
+# QNX generated images and deployment artifacts
+*.ifs
+*.img
+
+# Python utilities and experiment scripts
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
