@@ -12,27 +12,6 @@ Build and evaluate a two-node real-time IoT platform:
 - DevSecOps practices provide automated checks, structured logs, runtime monitoring,
   and evidence for the final evaluation.
 
-## Architecture
-
-```mermaid
-flowchart LR
-    S["STM32 NUCLEO-H563ZI<br/>FreeRTOS sensing node"]
-    V["Ada / SPARK<br/>formally verified validation"]
-    Q["Raspberry Pi 4<br/>QNX 8 supervisory node"]
-
-    S -->|"framed sensor data"| V
-    V -->|"accepted data"| Q
-    Q -->|"commands"| S
-
-    D["DevSecOps<br/>build checks · tests · logging · monitoring"]
-    D -.-> S
-    D -.-> V
-    D -.-> Q
-```
-
-The minimum viable product is a reliable bidirectional link between the STM32 and
-QNX nodes. Formal verification and monitoring are added only after that link is
-stable.
 
 ## Target hardware
 
@@ -71,16 +50,4 @@ keeping each change small and explainable.
 7. Measure latency, jitter, reliability, and abnormal-condition behavior.
 8. Produce the report, presentation, and demonstration.
 
-## Getting started
-
-See [the Week 2 setup guide](docs/week-02-setup.md) for required software,
-installation checks, and current setup status.
-
-## Working principles
-
-- Research current official guidance before choosing a solution.
-- Compare alternatives and record important trade-offs.
-- Protect the minimum viable system before adding stretch features.
-- Understand, test, and document each increment before building on it.
-- Keep commits small, descriptive, and reproducible.
 

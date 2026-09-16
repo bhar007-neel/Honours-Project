@@ -22,34 +22,6 @@ program can be built and run or flashed with the corresponding toolchain.
 Tools bundled inside an IDE may not appear on the normal terminal `PATH`. The
 functional checks above are the source of truth.
 
-## 1. Git and GitHub
-
-The local repository is initialized on `main`. Git author identity is configured.
-
-After creating an empty **private** GitHub repository, connect and publish it:
-
-```powershell
-git remote add origin <YOUR_GITHUB_REPOSITORY_URL>
-git push -u origin main
-```
-
-Do not initialize the GitHub repository with a README, license, or `.gitignore`;
-those files are maintained locally.
-
-Recommended daily workflow:
-
-```powershell
-git status
-git switch -c feature/short-description
-# Make and verify one focused change.
-git add <specific-files>
-git commit -m "type: concise description"
-git push -u origin feature/short-description
-```
-
-Use prefixes such as `docs`, `build`, `feat`, `fix`, and `test`. Never commit
-licenses, credentials, generated binaries, IDE workspaces, or private keys.
-
 ## 2. STM32 and FreeRTOS
 
 Install the current Windows release of
@@ -108,24 +80,14 @@ project dependency so the required version is reproducible.
 
 ## 5. Week 2 completion checklist
 
-- [x] Initialize the local Git repository on `main`.
-- [x] Configure Git author identity.
-- [x] Add project scope, architecture, and working principles to `README.md`.
-- [ ] Create the private GitHub repository and add it as `origin`.
-- [ ] Make and push the initial commit.
-- [ ] Confirm which hardware is supplied by the university.
-- [ ] Install STM32CubeIDE and complete a build/flash/debug smoke test.
-- [ ] Obtain the QNX license and install QNX SDP 8.0.
-- [ ] Install the Raspberry Pi 4 QNX Quick Start image package.
-- [ ] Install Alire and run a GNATprove sample.
-- [ ] Record exact installed versions and smoke-test evidence.
-
-## Official references
-
-- [STM32CubeIDE](https://www.st.com/en/development-tools/stm32cubeide.html)
-- [QNX Everywhere non-commercial access](https://www.qnx.com/products/everywhere/)
-- [QNX Raspberry Pi Quick Start Target Image](https://www.qnx.com/developers/docs/qnxeverywhere/com.qnx.doc.target_images/topic/qsti/intro.html)
-- [QNX SDP 8.0 Raspberry Pi 4 release notes](https://www.qnx.com/developers/docs/BSP8.0/com.qnx.doc.bsp.releasenotes/topic/rel_sdp80.bsp.broadcom.rpi4.bcm2711.html)
-- [Alire getting started](https://alire.ada.dev/docs/getting-started)
-- [GNATprove package in Alire](https://alire.ada.dev/crates/gnatprove)
+-  Initialize the local Git repository on `main`.
+-  Configure Git author identity.
+-  Add project scope, architecture, and working principles to `README.md`.
+-  Create the private GitHub repository and add it as `origin`.
+- Make and push the initial commit.
+- Install STM32CubeIDE and complete a build/flash/debug smoke test.
+-  Obtain the QNX license and install QNX SDP 8.0.
+- Install the Raspberry Pi 4 QNX Quick Start image package.
+-  Install Alire and run a GNATprove sample.
+-  Record exact installed versions and smoke-test evidence.
 
