@@ -1,6 +1,6 @@
 # Week 2: Development Environment and Version Control
 
-Last verified: 2026-09-15
+Last verified: 2026-09-26
 
 ## Objective
 
@@ -11,12 +11,16 @@ program can be built and run or flashed with the corresponding toolchain.
 ## Current status
 
 - **Version control:** Git is installed and configured; the repository uses `main`.
-- **STM32:** STM32CubeIDE 2.2.0 was not detected. Verification will build and
-  flash the board's LED example.
-- **QNX:** QNX Software Center and SDP 8.0 were not detected. Verification will
-  cross-compile and run Hello World.
-- **Ada/SPARK:** Alire and GNATprove were not detected. Verification will prove
-  the sample project's contracts.
+- **STM32:** STM32CubeIDE 2.2.0 is installed in `C:\ST\STM32CubeIDE_2.2.0`.
+  Its bundled GNU Arm toolchain 14.3 compiles `firmware/stm32/app` cleanly.
+  The board build/flash/debug smoke test is pending until the board is
+  connected.
+- **QNX:** SDP 8.0 is installed in `%USERPROFILE%\qnx800`. `qcc` for
+  `aarch64le` builds all five programs in `supervisor/qnx` with `-Werror`.
+  Running them requires the Pi 4 Quick Start image.
+- **Ada/SPARK:** the Alire installer has been downloaded but not run, so
+  `alr` is not on `PATH`. The proof target is `verification/spark/edge_gate`.
+- **Host C compiler:** MSYS2 GCC 15.2 builds and runs `tests/host`.
 - **Editor:** Cursor or VS Code is installed and can open this repository.
 
 Tools bundled inside an IDE may not appear on the normal terminal `PATH`. The
@@ -78,16 +82,34 @@ alr gnatprove
 Alire supplies compatible GNAT toolchains for Windows. GNATprove should be a
 project dependency so the required version is reproducible.
 
+The project's smoke test is `verification/spark/edge_gate`:
+
+```powershell
+cd verification\spark\edge_gate
+alr with gnatprove      # first time only; records the dependency in alire.toml
+alr build
+.\bin\edge_gate_demo.exe
+alr gnatprove
+```
+
+Success means `gnatprove` reports every check as proved, including the
+`Contract_Cases` of `Check` and the overflow-free subtraction in
+`Temperature_Step_Ok`. Save the output in `docs/evidence/` for the
+verification chapter.
+
 ## 5. Week 2 completion checklist
 
--  Initialize the local Git repository on `main`.
--  Configure Git author identity.
--  Add project scope, architecture, and working principles to `README.md`.
--  Create the private GitHub repository and add it as `origin`.
-- Make and push the initial commit.
-- Install STM32CubeIDE and complete a build/flash/debug smoke test.
--  Obtain the QNX license and install QNX SDP 8.0.
-- Install the Raspberry Pi 4 QNX Quick Start image package.
--  Install Alire and run a GNATprove sample.
--  Record exact installed versions and smoke-test evidence.
+- [x] Initialize the local Git repository on `main`.
+- [x] Configure Git author identity.
+- [x] Add project scope, architecture, and working principles to `README.md`.
+- [x] Create the private GitHub repository and add it as `origin`.
+- [x] Make and push the initial commit.
+- [x] Install STM32CubeIDE 2.2.0.
+- [ ] Complete the STM32 build/flash/debug smoke test on the board.
+- [x] Obtain the QNX license and install QNX SDP 8.0.
+- [x] Cross-compile QNX programs with `qcc` (`supervisor/qnx`).
+- [ ] Install the Raspberry Pi 4 QNX Quick Start image package and boot the Pi.
+- [ ] Run the Alire installer and prove `verification/spark/edge_gate`.
+- [x] Write the technical background summary (`week-02-background.md`).
+- [ ] Record exact installed versions and smoke-test evidence.
 
