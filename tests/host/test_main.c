@@ -6,7 +6,9 @@
 #include <string.h>
 
 #include "edge_protocol.h"
+#include "link_health.h"
 #include "rt_stats.h"
+#include "sensor_gate.h"
 #include "sensor_sim.h"
 
 static int g_failures;
@@ -262,6 +264,117 @@ static void test_rt_stats_jitter_and_overruns(void)
     CHECK(s.jobs == 0 && s.max_jitter_us == 0 && !s.has_last_release);
 }
 
+static void test_sensor_gate_matches_spark_contracts(void)
+{
+    const edge_sensor_payload_t room = {2345, 4510, 101325};
+    const edge_sensor_payload_t hot = {12000, 4510, 101325};
+    const edge_sensor_payload_t wet = {2345, 10001, 101325};
+    const edge_sensor_payload_t low_pressure = {2345, 4510, 29999};
+    const edge_sensor_payload_t boundary = {-4000, 10000, 110000};
+    const edge_sensor_payload_t other_boundary = {8500, 0, 30000};
+    /* Temperature is checked first, so a wet-and-hot reading names temperature. */
+    const edge_sensor_payload_t hot_and_wet = {12000, 10001, 101325};
+
+    CHECK(sensor_gate_check(&room) == SENSOR_GATE_ACCEPTED);
+    CHECK(sensor_gate_check(&hot) == SENSOR_GATE_TEMPERATURE_OUT_OF_RANGE);
+    CHECK(sensor_gate_check(&wet) == SENSOR_GATE_HUMIDITY_OUT_OF_RANGE);
+    CHECK(sensor_gate_check(&low_pressure) == SENSOR_GATE_PRESSURE_OUT_OF_RANGE);
+    CHECK(sensor_gate_check(&boundary) == SENSOR_GATE_ACCEPTED);
+    CHECK(sensor_gate_check(&other_boundary) == SENSOR_GATE_ACCEPTED);
+    CHECK(sensor_gate_check(&hot_and_wet) == SENSOR_GATE_TEMPERATURE_OUT_OF_RANGE);
+
+    CHECK(sensor_gate_temperature_step_ok(2200, 2240, SENSOR_GATE_MAX_STEP_CENTI_C));
+    CHECK(sensor_gate_temperature_step_ok(2200, 2300, SENSOR_GATE_MAX_STEP_CENTI_C));
+    CHECK(!sensor_gate_temperature_step_ok(2200, 2301, SENSOR_GATE_MAX_STEP_CENTI_C));
+    /* 32767 - (-32768) is 65535, which is wider than any int16 step limit. */
+    CHECK(!sensor_gate_temperature_step_ok(INT16_MIN, INT16_MAX, SENSOR_GATE_MAX_STEP_CENTI_C));
+    CHECK(!sensor_gate_temperature_step_ok(INT16_MIN, INT16_MAX, INT16_MAX));
+    CHECK(sensor_gate_temperature_step_ok(0, INT16_MAX, INT16_MAX));
+}
+
+static void test_command_roundtrip(void)
+{
+    const edge_command_payload_t command = {EDGE_CMD_SET_PERIOD, 50};
+    uint8_t payload[EDGE_COMMAND_PAYLOAD_LEN];
+    edge_command_encode(&command, payload);
+
+    edge_command_payload_t decoded;
+    CHECK(edge_command_decode(payload, sizeof payload, &decoded));
+    CHECK(decoded.id == EDGE_CMD_SET_PERIOD);
+    CHECK(decoded.period_ms == 50);
+    CHECK(!edge_command_decode(payload, 2, &decoded));
+    CHECK(strcmp(edge_command_name(EDGE_CMD_SET_PERIOD), "set_period") == 0);
+    CHECK(strcmp(edge_command_name(0x7Fu), "unknown") == 0);
+
+    CHECK(edge_sensor_period_allowed(10));
+    CHECK(edge_sensor_period_allowed(20));
+    CHECK(edge_sensor_period_allowed(50));
+    CHECK(edge_sensor_period_allowed(100));
+    CHECK(edge_sensor_period_allowed(200));
+    CHECK(!edge_sensor_period_allowed(0));
+    CHECK(!edge_sensor_period_allowed(15));
+    CHECK(!edge_sensor_period_allowed(1000));
+
+    edge_frame_t frame = {0};
+    frame.type = EDGE_MSG_COMMAND;
+    frame.sequence = 7;
+    frame.timestamp_ms = 42;
+    frame.payload_len = EDGE_COMMAND_PAYLOAD_LEN;
+    memcpy(frame.payload, payload, sizeof payload);
+
+    uint8_t wire[EDGE_MAX_FRAME];
+    const size_t len = edge_frame_encode(&frame, wire, sizeof wire);
+    CHECK(len == EDGE_OVERHEAD + EDGE_COMMAND_PAYLOAD_LEN);
+
+    edge_decoder_t decoder;
+    edge_decoder_init(&decoder);
+    capture_t captured;
+    memset(&captured, 0, sizeof captured);
+    edge_decoder_feed(&decoder, wire, len, capture_handler, &captured);
+    CHECK(captured.ok == 1);
+    CHECK(captured.last.type == EDGE_MSG_COMMAND);
+    CHECK(edge_command_decode(captured.last.payload, captured.last.payload_len, &decoded));
+    CHECK(decoded.period_ms == 50);
+}
+
+static void test_link_health_sequence_and_silence(void)
+{
+    edge_link_health_t health;
+    edge_link_health_init(&health);
+
+    CHECK(edge_link_health_observe(&health, 1) == EDGE_SEQ_FIRST);
+    CHECK(edge_link_health_observe(&health, 2) == EDGE_SEQ_IN_ORDER);
+    CHECK(edge_link_health_observe(&health, 3) == EDGE_SEQ_IN_ORDER);
+    CHECK(edge_link_health_observe(&health, 3) == EDGE_SEQ_DUPLICATE);
+    CHECK(health.last_sequence == 3);
+    CHECK(edge_link_health_observe(&health, 2) == EDGE_SEQ_REORDER);
+    CHECK(health.last_sequence == 3);
+    CHECK(edge_link_health_observe(&health, 6) == EDGE_SEQ_GAP);
+    CHECK(health.missing == 2u);
+    CHECK(health.gaps == 1u);
+    CHECK(health.duplicates == 1u);
+    CHECK(health.reorders == 1u);
+    CHECK(health.in_order == 2u);
+    CHECK(strcmp(edge_seq_event_name(EDGE_SEQ_GAP), "gap") == 0);
+
+    /* 65535 then 0 is the natural wrap, a distance of one. */
+    edge_link_health_init(&health);
+    CHECK(edge_link_health_observe(&health, 65535) == EDGE_SEQ_FIRST);
+    CHECK(edge_link_health_observe(&health, 0) == EDGE_SEQ_IN_ORDER);
+    CHECK(health.last_sequence == 0);
+
+    /* No silence alarm before the first byte, then one alarm per quiet stretch. */
+    edge_link_health_init(&health);
+    CHECK(!edge_link_health_poll_silence(&health, 5000u, EDGE_LINK_SILENCE_MS));
+    edge_link_health_hear(&health, 1000u);
+    CHECK(!edge_link_health_poll_silence(&health, 3999u, EDGE_LINK_SILENCE_MS));
+    CHECK(edge_link_health_poll_silence(&health, 4000u, EDGE_LINK_SILENCE_MS));
+    CHECK(!edge_link_health_poll_silence(&health, 8000u, EDGE_LINK_SILENCE_MS));
+    edge_link_health_hear(&health, 8000u);
+    CHECK(edge_link_health_poll_silence(&health, 11000u, EDGE_LINK_SILENCE_MS));
+    CHECK(health.silence_events == 2u);
+}
+
 int main(void)
 {
     RUN(test_crc_known_vector);
@@ -276,6 +389,9 @@ int main(void)
     RUN(test_status_roundtrip);
     RUN(test_sensor_sim_is_deterministic_and_in_range);
     RUN(test_rt_stats_jitter_and_overruns);
+    RUN(test_sensor_gate_matches_spark_contracts);
+    RUN(test_command_roundtrip);
+    RUN(test_link_health_sequence_and_silence);
 
     printf("\n%d checks, %d failures\n", g_checks, g_failures);
     return g_failures == 0 ? 0 : 1;

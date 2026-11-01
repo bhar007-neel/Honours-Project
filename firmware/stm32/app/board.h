@@ -28,6 +28,16 @@ void board_led_toggle(board_led_t led);
  */
 bool board_link_write(const uint8_t *data, size_t len, uint32_t timeout_ms);
 
+/* Arms interrupt-driven reception. Call once from a task, after the UART is up. */
+void board_link_rx_start(void);
+
+/*
+ * Copies up to cap bytes that the UART interrupt has already received.
+ * Returns how many were copied. When the ring is empty, blocks the calling
+ * task for up to timeout_ms (0 returns immediately).
+ */
+size_t board_link_read(uint8_t *out, size_t cap, uint32_t timeout_ms);
+
 uint32_t board_cycles(void);
 uint32_t board_cycles_per_us(void);
 

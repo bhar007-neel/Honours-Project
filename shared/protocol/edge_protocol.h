@@ -43,9 +43,9 @@ extern "C" {
 #define EDGE_MAX_FRAME    (EDGE_OVERHEAD + EDGE_MAX_PAYLOAD)
 
 typedef enum {
-    EDGE_MSG_SENSOR  = 0x01, /* STM32 -> Pi: one sensor sample   */
-    EDGE_MSG_STATUS  = 0x02, /* STM32 -> Pi: heartbeat + health  */
-    EDGE_MSG_COMMAND = 0x10  /* Pi -> STM32: reserved for Week 5 */
+    EDGE_MSG_SENSOR  = 0x01, /* STM32 -> Pi: one sensor sample  */
+    EDGE_MSG_STATUS  = 0x02, /* STM32 -> Pi: heartbeat + health */
+    EDGE_MSG_COMMAND = 0x10  /* Pi -> STM32: one command        */
 } edge_msg_type_t;
 
 typedef struct {
@@ -77,14 +77,31 @@ typedef struct {
 
 #define EDGE_STATUS_PAYLOAD_LEN 20u
 
+/* Command payload: one id byte, then a little-endian argument.
+ * SET_PERIOD's argument is the new sample period in milliseconds.
+ * The node accepts only the periods the button already uses. */
+#define EDGE_CMD_SET_PERIOD       0x01u
+#define EDGE_COMMAND_PAYLOAD_LEN  3u
+
+typedef struct {
+    uint8_t  id;
+    uint16_t period_ms;
+} edge_command_payload_t;
+
+/* Folds one byte into a running CRC-16/CCITT-FALSE value.
+ * crc is the result so far. A new buffer starts at 0xFFFF.
+ * Returns the updated CRC. */
 uint16_t edge_crc16_update(uint16_t crc, uint8_t byte);
+
+/* CRC-16/CCITT-FALSE over data[0 .. len). Starts from 0xFFFF.
+ * Callers pass the bytes from the version field through the end of the payload.
+ * The two start bytes are not included. */
 uint16_t edge_crc16(const uint8_t *data, size_t len);
 
-/*
- * Serializes a frame into out. Returns the number of bytes written, or 0 if
- * the payload is too long or out_cap is too small. Always needs at most
- * EDGE_MAX_FRAME bytes.
- */
+/* Writes frame into out as wire bytes, little-endian, and appends the CRC.
+ * Returns the number of bytes written, or 0 if frame or out is NULL, the
+ * payload is longer than EDGE_MAX_PAYLOAD, or out_cap is too small.
+ * A successful frame occupies at most EDGE_MAX_FRAME bytes. */
 size_t edge_frame_encode(const edge_frame_t *frame, uint8_t *out, size_t out_cap);
 
 typedef enum {
@@ -108,28 +125,57 @@ typedef struct {
     edge_decoder_stats_t stats;
 } edge_decoder_t;
 
-/* frame is only non-NULL when event == EDGE_DECODE_FRAME_OK. */
+/* Called once per finished frame. frame is non-NULL only when event is
+ * EDGE_DECODE_FRAME_OK. ctx is whatever the caller passed to edge_decoder_feed. */
 typedef void (*edge_decode_handler_t)(void *ctx, edge_decode_event_t event,
                                       const edge_frame_t *frame);
 
+/* Clears the decoder buffer and every counter. Call once before the first feed. */
 void edge_decoder_init(edge_decoder_t *dec);
 
-/*
- * Streaming decoder: feed any number of bytes as they arrive. The handler is
- * called once per complete frame and once per rejected candidate frame. After
- * a rejection the decoder rescans from the byte after the bad SOF, so a valid
- * frame hidden inside corrupted data is still recovered.
- */
+/* Appends len bytes from data and extracts every complete frame in the buffer.
+ * handler runs once for each good frame and once for each rejected candidate.
+ * A partial frame stays buffered until a later call delivers the rest.
+ * After a rejection, scanning continues at the next byte, so a good frame
+ * that follows garbage is still found. */
 void edge_decoder_feed(edge_decoder_t *dec, const uint8_t *data, size_t len,
                        edge_decode_handler_t handler, void *ctx);
 
+/* Packs a sensor sample into 8 little-endian bytes: temperature, then
+ * humidity, then pressure. */
 void edge_sensor_encode(const edge_sensor_payload_t *in, uint8_t out[EDGE_SENSOR_PAYLOAD_LEN]);
+
+/* Unpacks an 8-byte sensor payload into out.
+ * Returns false, and does not write out, when len is not 8. */
 bool edge_sensor_decode(const uint8_t *payload, size_t len, edge_sensor_payload_t *out);
 
+/* Packs a status report into 20 little-endian bytes, in the field order
+ * of edge_status_payload_t. */
 void edge_status_encode(const edge_status_payload_t *in, uint8_t out[EDGE_STATUS_PAYLOAD_LEN]);
+
+/* Unpacks a 20-byte status payload into out.
+ * Returns false, and does not write out, when len is not 20. */
 bool edge_status_decode(const uint8_t *payload, size_t len, edge_status_payload_t *out);
 
+/* Packs a command into 3 little-endian bytes: id, then period_ms. */
+void edge_command_encode(const edge_command_payload_t *in, uint8_t out[EDGE_COMMAND_PAYLOAD_LEN]);
+
+/* Unpacks a 3-byte command payload into out.
+ * Returns false, and does not write out, when len is not 3. */
+bool edge_command_decode(const uint8_t *payload, size_t len, edge_command_payload_t *out);
+
+/* True for 10, 20, 50, 100, and 200 ms. Those are the periods the sensing
+ * node already cycles with the user button. */
+bool edge_sensor_period_allowed(uint16_t period_ms);
+
+/* Returns "set_period" or "unknown". For logs. */
+const char *edge_command_name(uint8_t id);
+
+/* Returns "SENSOR", "STATUS", "COMMAND", or "UNKNOWN". For logs. */
 const char *edge_msg_type_name(uint8_t type);
+
+/* Returns "frame_ok", "bad_version", "bad_length", "bad_crc", or "unknown".
+ * For logs. */
 const char *edge_decode_event_name(edge_decode_event_t event);
 
 #ifdef __cplusplus

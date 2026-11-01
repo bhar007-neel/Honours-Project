@@ -34,16 +34,31 @@ typedef struct {
     bool has_last_release;
 } rt_stats_t;
 
+/* Prepares s for one periodic task.
+ * nominal_period_us is the intended gap between releases.
+ * tolerance_pct is how far past that gap a release may slip before it counts
+ * as an overrun (10 means 10 percent).
+ * cycles_per_us converts the caller's cycle counter into microseconds.
+ * A value of 0 is treated as 1 so later divisions stay safe. */
 void rt_stats_init(rt_stats_t *s, uint32_t nominal_period_us, uint32_t tolerance_pct,
                    uint32_t cycles_per_us);
 
-/* Clears measurements and applies a new nominal period (e.g. after a rate change). */
+/* Wipes the measurements and stores a new nominal period and tolerance.
+ * cycles_per_us is left alone. Call this after a sample-rate change. */
 void rt_stats_reset(rt_stats_t *s, uint32_t nominal_period_us, uint32_t tolerance_pct);
 
+/* Call when a job is released, with the cycle counter at that instant.
+ * The first call only remembers now_cycles. Each later call measures the gap
+ * since the previous release and updates period, jitter, and overrun. */
 void rt_stats_on_release(rt_stats_t *s, uint32_t now_cycles);
+
+/* Call when that job finishes. Measures execution time from the latest
+ * release to now_cycles and keeps the longest one seen. Does nothing if
+ * on_release has never been called. */
 void rt_stats_on_complete(rt_stats_t *s, uint32_t now_cycles);
 
-/* Average measured period in microseconds, or 0 before two releases. */
+/* Average of the measured periods, in microseconds.
+ * Returns 0 until two releases have happened (jobs is still 0). */
 uint32_t rt_stats_avg_period_us(const rt_stats_t *s);
 
 #endif /* RT_STATS_H */

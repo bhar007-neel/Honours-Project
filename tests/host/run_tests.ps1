@@ -8,7 +8,9 @@ $sources = @(
     "$PSScriptRoot\test_main.c",
     "$root\shared\protocol\edge_protocol.c",
     "$root\shared\common\sensor_sim.c",
-    "$root\shared\common\rt_stats.c"
+    "$root\shared\common\sensor_gate.c",
+    "$root\shared\common\rt_stats.c",
+    "$root\shared\common\link_health.c"
 )
 
 & gcc -std=c11 -Wall -Wextra -Wpedantic -Werror -Wconversion -g `

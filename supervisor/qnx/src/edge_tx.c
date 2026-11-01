@@ -11,6 +11,8 @@
  *   edge_tx -s /dev/ser2 [-b 115200] serial port
  *   edge_tx -o capture.bin | -o -    file or stdout
  *   options: -p period_ms (100)  -n frames (0 = forever)  -e corrupt_every_n
+ *            -c period_ms   send one SET_PERIOD command and exit
+ *                           (10, 20, 50, 100, or 200)
  */
 #include <arpa/inet.h>
 #include <errno.h>
@@ -105,10 +107,10 @@ static int open_udp(const char *host_port, struct sockaddr_in *dest)
 int main(int argc, char **argv)
 {
     const char *udp_target = NULL, *serial_path = NULL, *out_path = NULL;
-    long baud = 115200, period_ms = 100, max_frames = 0, corrupt_every = 0;
+    long baud = 115200, period_ms = 100, max_frames = 0, corrupt_every = 0, command_ms = -1;
 
     int opt;
-    while ((opt = getopt(argc, argv, "u:s:b:o:p:n:e:")) != -1) {
+    while ((opt = getopt(argc, argv, "u:s:b:o:p:n:e:c:")) != -1) {
         switch (opt) {
         case 'u': udp_target = optarg; break;
         case 's': serial_path = optarg; break;
@@ -117,9 +119,11 @@ int main(int argc, char **argv)
         case 'p': period_ms = atol(optarg); break;
         case 'n': max_frames = atol(optarg); break;
         case 'e': corrupt_every = atol(optarg); break;
+        case 'c': command_ms = atol(optarg); break;
         default:
             fprintf(stderr, "usage: %s (-u host:port | -s device [-b baud] | -o file|-) "
-                            "[-p period_ms] [-n frames] [-e corrupt_every_n]\n", argv[0]);
+                            "[-p period_ms] [-n frames] [-e corrupt_every_n] [-c period_ms]\n",
+                    argv[0]);
             return EXIT_FAILURE;
         }
     }
@@ -146,6 +150,44 @@ int main(int argc, char **argv)
 
     signal(SIGINT, on_signal);
     signal(SIGPIPE, SIG_IGN);
+
+    if (command_ms >= 0) {
+        if (command_ms > UINT16_MAX || !edge_sensor_period_allowed((uint16_t)command_ms)) {
+            fprintf(stderr, "command period must be 10, 20, 50, 100, or 200 ms\n");
+            if (fd != STDOUT_FILENO) {
+                close(fd);
+            }
+            return EXIT_FAILURE;
+        }
+
+        edge_command_payload_t command;
+        memset(&command, 0, sizeof command);
+        command.id = EDGE_CMD_SET_PERIOD;
+        command.period_ms = (uint16_t)command_ms;
+
+        edge_frame_t frame;
+        memset(&frame, 0, sizeof frame);
+        frame.type = EDGE_MSG_COMMAND;
+        frame.sequence = 0;
+        frame.timestamp_ms = monotonic_ms();
+        frame.payload_len = EDGE_COMMAND_PAYLOAD_LEN;
+        edge_command_encode(&command, frame.payload);
+
+        uint8_t wire[EDGE_MAX_FRAME];
+        const size_t len = edge_frame_encode(&frame, wire, sizeof wire);
+        const ssize_t written = udp_target
+            ? sendto(fd, wire, len, 0, (struct sockaddr *)&dest, sizeof dest)
+            : write(fd, wire, len);
+        if (fd != STDOUT_FILENO) {
+            close(fd);
+        }
+        if (written != (ssize_t)len) {
+            perror("send");
+            return EXIT_FAILURE;
+        }
+        fprintf(stderr, "edge_tx command set_period=%ld\n", command_ms);
+        return EXIT_SUCCESS;
+    }
 
     sensor_sim_t sim;
     sensor_sim_init(&sim, 0x1234ABCDu);

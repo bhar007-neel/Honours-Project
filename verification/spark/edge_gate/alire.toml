@@ -3,3 +3,6 @@ description = "SPARK-verified acceptance gate for sensor readings"
 version = "0.1.0-dev"
 authors = ["Neelmani Bharadwaj"]
 executables = ["edge_gate_demo"]
+
+[[depends-on]]
+gnatprove = "^16.1.0"
