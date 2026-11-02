@@ -13,6 +13,8 @@
 #define PRESS_PERIOD_MS     300000u
 #define PRESS_NOISE         5
 
+/* Advances the noise generator by one step and returns the new value.
+ * The same state always produces the same next value, so a run can be repeated. */
 static uint32_t xorshift32(uint32_t *state)
 {
     uint32_t x = *state;
@@ -23,13 +25,15 @@ static uint32_t xorshift32(uint32_t *state)
     return x;
 }
 
-/* Uniform integer in [-amplitude, +amplitude]. */
+/* Returns one random offset in the range -amplitude .. +amplitude.
+ * Each call consumes one step of the simulator's generator. */
 static int32_t noise(sensor_sim_t *sim, int32_t amplitude)
 {
     return (int32_t)(xorshift32(&sim->rng_state) % (uint32_t)(2 * amplitude + 1)) - amplitude;
 }
 
-/* Triangle wave in [-amplitude, +amplitude] with the given period. */
+/* Returns a point on a triangle wave that rises from -amplitude to +amplitude
+ * and back again, once every period_ms. now_ms selects where on that wave we are. */
 static int32_t triangle(uint32_t now_ms, uint32_t period_ms, int32_t amplitude)
 {
     const uint32_t phase = now_ms % period_ms;
@@ -38,12 +42,16 @@ static int32_t triangle(uint32_t now_ms, uint32_t period_ms, int32_t amplitude)
     return (int32_t)(((int64_t)rise * 2 * amplitude) / half) - amplitude;
 }
 
+/* Saves the seed that noise() will start from. See sensor_sim.h. */
 void sensor_sim_init(sensor_sim_t *sim, uint32_t seed)
 {
     /* xorshift must never hold zero. */
     sim->rng_state = (seed != 0u) ? seed : 0x6D2B79F5u;
 }
 
+/* Fills out with one sample: a slow temperature wave, humidity that falls when
+ * temperature rises, and a much slower pressure wave. Each field then gets a
+ * small noise() offset. See sensor_sim.h. */
 void sensor_sim_read(sensor_sim_t *sim, uint32_t now_ms, edge_sensor_payload_t *out)
 {
     const int32_t temp_offset = triangle(now_ms, TEMP_PERIOD_MS, TEMP_SWING_CENTI_C);

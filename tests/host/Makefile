@@ -7,7 +7,9 @@ CPPFLAGS += -I$(ROOT)/shared/protocol -I$(ROOT)/shared/common
 SRCS := test_main.c \
         $(ROOT)/shared/protocol/edge_protocol.c \
         $(ROOT)/shared/common/sensor_sim.c \
-        $(ROOT)/shared/common/rt_stats.c
+        $(ROOT)/shared/common/sensor_gate.c \
+        $(ROOT)/shared/common/rt_stats.c \
+        $(ROOT)/shared/common/link_health.c
 
 build/host_tests: $(SRCS)
 	mkdir -p build

@@ -1,5 +1,5 @@
 /*
- * Sensing-node application: four FreeRTOS tasks.
+ * Sensing-node application: five FreeRTOS tasks.
  *
  *   SensorTask     periodic (100 ms default), highest priority. Samples the
  *                  sensor at a fixed rate with xTaskDelayUntil and measures its
@@ -8,11 +8,13 @@
  *                  sample, and transmits it over the link UART.
  *   ControlTask    sporadic. Woken by the user-button interrupt through a
  *                  binary semaphore; cycles the sensor period.
+ *   RxTask         sporadic, same priority as ControlTask. Decodes command
+ *                  frames from the link UART and applies a new sample period.
  *   HeartbeatTask  periodic (1 s), lowest priority. Blinks LD1 and reports
  *                  health: dropped samples, jitter, stack and heap margins.
  *
- * Synchronization: queue (SensorTask -> CommTask), mutex (CommTask and
- * HeartbeatTask share the UART), binary semaphore (ISR -> ControlTask).
+ * Synchronization: queue (SensorTask -> CommTask), mutex (every task that
+ * transmits shares the UART), binary semaphore (ISR -> ControlTask).
  */
 #include "app.h"
 
@@ -35,7 +37,7 @@ typedef struct {
     edge_sensor_payload_t reading;
 } sample_t;
 
-enum { TASK_SENSOR, TASK_COMM, TASK_CONTROL, TASK_HEARTBEAT, TASK_COUNT };
+enum { TASK_SENSOR, TASK_COMM, TASK_CONTROL, TASK_RX, TASK_HEARTBEAT, TASK_COUNT };
 
 static QueueHandle_t s_sample_queue;
 static SemaphoreHandle_t s_link_mutex;
@@ -44,7 +46,9 @@ static TaskHandle_t s_tasks[TASK_COUNT];
 
 static volatile uint32_t s_sensor_period_ms = APP_SENSOR_PERIOD_MS_DEFAULT;
 static volatile uint32_t s_samples_dropped; /* written only by SensorTask */
-static rt_stats_t s_sensor_stats;           /* written only by SensorTask */
+static volatile uint32_t s_commands_applied;   /* written only by RxTask */
+static volatile uint32_t s_commands_rejected;  /* written only by RxTask */
+static rt_stats_t s_sensor_stats;              /* written only by SensorTask */
 
 /* Guarded by s_link_mutex. */
 static uint16_t s_sequence;
@@ -59,6 +63,19 @@ static uint32_t uptime_ms(void)
 static uint16_t clamp_u16(uint32_t v)
 {
     return (v > UINT16_MAX) ? UINT16_MAX : (uint16_t)v;
+}
+
+/* Stores a sample period the protocol allows, and toggles LD2 so a command
+ * is visible even when the serial output is binary. Returns false when
+ * period_ms is not one of 10, 20, 50, 100, 200. */
+static bool apply_sensor_period(uint32_t period_ms)
+{
+    if (period_ms > UINT16_MAX || !edge_sensor_period_allowed((uint16_t)period_ms)) {
+        return false;
+    }
+    s_sensor_period_ms = period_ms;
+    board_led_toggle(BOARD_LED_YELLOW);
+    return true;
 }
 
 /* Takes the link and returns the sequence number for the message about to be sent. */
@@ -151,18 +168,20 @@ static void send_status(void)
     st.free_heap_bytes = (uint32_t)xPortGetFreeHeapSize();
 
 #if APP_OUTPUT_TEXT
-    char line[224];
+    char line[288];
     const int n = snprintf(line, sizeof line,
                            "STATUS seq=%u t_ms=%lu period_ms=%u avg_period_us=%lu "
                            "max_jitter_us=%u overruns=%u max_exec_us=%lu dropped=%lu "
-                           "sent=%lu link_errors=%lu stack_min_words=%u heap_free=%lu\r\n",
+                           "sent=%lu link_errors=%lu stack_min_words=%u heap_free=%lu "
+                           "commands=%lu cmd_rejected=%lu\r\n",
                            (unsigned)seq, (unsigned long)now, (unsigned)st.sensor_period_ms,
                            (unsigned long)rt_stats_avg_period_us(&s_sensor_stats),
                            (unsigned)st.max_jitter_us, (unsigned)st.deadline_misses,
                            (unsigned long)s_sensor_stats.max_exec_us,
                            (unsigned long)st.samples_dropped, (unsigned long)st.frames_sent,
                            (unsigned long)s_link_errors, (unsigned)st.min_stack_free_words,
-                           (unsigned long)st.free_heap_bytes);
+                           (unsigned long)st.free_heap_bytes, (unsigned long)s_commands_applied,
+                           (unsigned long)s_commands_rejected);
     link_write_and_end((const uint8_t *)line, text_len(n, sizeof line));
 #else
     uint8_t payload[EDGE_STATUS_PAYLOAD_LEN];
@@ -232,8 +251,64 @@ static void control_task(void *arg)
         }
 
         step = (step + 1u) % (sizeof steps_ms / sizeof steps_ms[0]);
-        s_sensor_period_ms = steps_ms[step];
-        board_led_toggle(BOARD_LED_YELLOW);
+        (void)apply_sensor_period(steps_ms[step]);
+    }
+}
+
+#if APP_OUTPUT_TEXT
+static void send_command_result(uint16_t period_ms, bool accepted)
+{
+    const uint16_t seq = link_begin();
+    const uint32_t now = uptime_ms();
+    char line[96];
+    const int n = snprintf(line, sizeof line,
+                           "COMMAND seq=%u t_ms=%lu period_ms=%u accepted=%s\r\n",
+                           (unsigned)seq, (unsigned long)now, (unsigned)period_ms,
+                           accepted ? "yes" : "no");
+    link_write_and_end((const uint8_t *)line, text_len(n, sizeof line));
+}
+#endif
+
+/* Runs from RxTask, never from an interrupt. Sensor and status frames on the
+ * wire are ignored: this node transmits those, it does not act on them. */
+static void on_link_frame(void *ctx, edge_decode_event_t event, const edge_frame_t *frame)
+{
+    (void)ctx;
+    if (event != EDGE_DECODE_FRAME_OK || frame->type != EDGE_MSG_COMMAND) {
+        return;
+    }
+
+    edge_command_payload_t command;
+    const bool decoded = edge_command_decode(frame->payload, frame->payload_len, &command);
+    const bool accepted = decoded && command.id == EDGE_CMD_SET_PERIOD &&
+                          apply_sensor_period(command.period_ms);
+    if (accepted) {
+        s_commands_applied = s_commands_applied + 1u;
+    } else {
+        s_commands_rejected = s_commands_rejected + 1u;
+    }
+
+#if APP_OUTPUT_TEXT
+    send_command_result(decoded ? command.period_ms : 0u, accepted);
+#else
+    (void)decoded;
+#endif
+}
+
+static void rx_task(void *arg)
+{
+    (void)arg;
+    board_link_rx_start();
+
+    edge_decoder_t decoder;
+    edge_decoder_init(&decoder);
+
+    for (;;) {
+        uint8_t buf[32];
+        const size_t n = board_link_read(buf, sizeof buf, 100u);
+        if (n > 0u) {
+            edge_decoder_feed(&decoder, buf, n, on_link_frame, NULL);
+        }
     }
 }
 
@@ -287,6 +362,7 @@ void app_init(void)
     create_task(sensor_task, "Sensor", APP_STACK_SENSOR, APP_PRIO_SENSOR, TASK_SENSOR);
     create_task(comm_task, "Comm", APP_STACK_COMM, APP_PRIO_COMM, TASK_COMM);
     create_task(control_task, "Control", APP_STACK_CONTROL, APP_PRIO_CONTROL, TASK_CONTROL);
+    create_task(rx_task, "Rx", APP_STACK_RX, APP_PRIO_CONTROL, TASK_RX);
     create_task(heartbeat_task, "Heartbeat", APP_STACK_HEARTBEAT, APP_PRIO_HEARTBEAT,
                 TASK_HEARTBEAT);
 }

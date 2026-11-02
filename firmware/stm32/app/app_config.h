@@ -39,5 +39,6 @@
 #define APP_STACK_COMM      512u
 #define APP_STACK_CONTROL   192u
 #define APP_STACK_HEARTBEAT 512u
+#define APP_STACK_RX        320u
 
 #endif /* APP_CONFIG_H */

@@ -13,12 +13,16 @@
 #include "edge_protocol.h"
 
 typedef struct {
-    uint32_t rng_state;
+    uint32_t rng_state; /* state of the noise generator; never zero */
 } sensor_sim_t;
 
+/* Stores seed in the simulator. A seed of 0 is replaced, because the noise
+ * generator would stay stuck at zero forever. */
 void sensor_sim_init(sensor_sim_t *sim, uint32_t seed);
 
-/* now_ms drives the slow waveforms; the same seed and times give the same data. */
+/* Writes one temperature, humidity, and pressure sample into out.
+ * now_ms picks the position on the slow temperature and pressure waves.
+ * The same seed and the same now_ms always produce the same reading. */
 void sensor_sim_read(sensor_sim_t *sim, uint32_t now_ms, edge_sensor_payload_t *out);
 
 #endif /* SENSOR_SIM_H */

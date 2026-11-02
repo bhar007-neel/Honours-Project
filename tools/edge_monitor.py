@@ -28,10 +28,14 @@ MAX_PAYLOAD = 64
 
 MSG_SENSOR = 0x01
 MSG_STATUS = 0x02
-MSG_NAMES = {MSG_SENSOR: "SENSOR", MSG_STATUS: "STATUS", 0x10: "COMMAND"}
+MSG_COMMAND = 0x10
+CMD_SET_PERIOD = 0x01
+SILENCE_MS = 3000
+MSG_NAMES = {MSG_SENSOR: "SENSOR", MSG_STATUS: "STATUS", MSG_COMMAND: "COMMAND"}
 
 SENSOR_FORMAT = struct.Struct("<hHI")
 STATUS_FORMAT = struct.Struct("<IIHHHHI")
+COMMAND_FORMAT = struct.Struct("<BH")
 
 
 def crc16_ccitt_false(data: bytes) -> int:
@@ -125,7 +129,29 @@ def describe(frame: Frame) -> str:
         return (f"{head} sent={sent} dropped={dropped} period_ms={period} "
                 f"max_jitter_us={jitter} overruns={overruns} stack_min_words={stack} "
                 f"heap_free={heap}")
+    if frame.msg_type == MSG_COMMAND and len(frame.payload) == COMMAND_FORMAT.size:
+        command_id, period = COMMAND_FORMAT.unpack(frame.payload)
+        command = "set_period" if command_id == CMD_SET_PERIOD else f"0x{command_id:02X}"
+        return f"{head} command={command} period_ms={period}"
     return f"{head} payload={frame.payload.hex()}"
+
+
+def classify_sequence(last: int | None, sequence: int) -> tuple[str, int | None, int]:
+    """Same four outcomes as shared/common/link_health.c.
+
+    Returns the event name, the new cursor (unchanged on duplicate or reorder),
+    and how many sequence numbers a gap skipped.
+    """
+    if last is None:
+        return "first", sequence, 0
+    forward = (sequence - last) & 0xFFFF
+    if forward == 0:
+        return "duplicate", last, 0
+    if forward >= 0x8000:
+        return "reorder", last, 0
+    if forward == 1:
+        return "in_order", sequence, 0
+    return "gap", sequence, forward - 1
 
 
 def serial_chunks(port: str, baud: int) -> Iterator[bytes]:
@@ -135,9 +161,8 @@ def serial_chunks(port: str, baud: int) -> Iterator[bytes]:
         sys.exit("pyserial is required for --port: python -m pip install pyserial")
     with serial.Serial(port, baud, timeout=0.2) as link:
         while True:
-            chunk = link.read(256)
-            if chunk:
-                yield chunk
+            # An empty read is a timeout. The caller uses it to notice silence.
+            yield link.read(256)
 
 
 def file_chunks(stream: BinaryIO) -> Iterator[bytes]:
@@ -149,25 +174,43 @@ def run(chunks: Iterator[bytes], save: BinaryIO | None, emit: Callable[[str], No
     decoder = Decoder()
     start = time.monotonic()
     last_seq: int | None = None
-    gaps = 0
+    counts = {"in_order": 0, "gap": 0, "duplicate": 0, "reorder": 0, "missing": 0}
+    heard = False
+    silent = False
+    last_heard = 0
+    silence_events = 0
     try:
         for chunk in chunks:
+            rx_ms = int((time.monotonic() - start) * 1000)
+            if not chunk:
+                if heard and not silent and rx_ms - last_heard >= SILENCE_MS:
+                    silent = True
+                    silence_events += 1
+                    emit(f"rx_ms={rx_ms} event=silence")
+                continue
             if save:
                 save.write(chunk)
+            heard = True
+            silent = False
+            last_heard = rx_ms
             for item in decoder.feed(chunk):
                 rx_ms = int((time.monotonic() - start) * 1000)
                 if isinstance(item, str):
                     emit(f"rx_ms={rx_ms} event={item}")
                     continue
-                if last_seq is not None and item.sequence != (last_seq + 1) & 0xFFFF:
-                    gaps += 1
-                last_seq = item.sequence
-                emit(f"rx_ms={rx_ms} event=frame {describe(item)}")
+                event, last_seq, missing = classify_sequence(last_seq, item.sequence)
+                if event in counts:
+                    counts[event] += 1
+                counts["missing"] += missing
+                emit(f"rx_ms={rx_ms} event=frame seq_event={event} {describe(item)}")
     except KeyboardInterrupt:
         pass
     s = decoder.stats
     emit(f"summary frames_ok={s.frames_ok} bad_crc={s.bad_crc} bad_length={s.bad_length} "
-         f"bad_version={s.bad_version} bytes_discarded={s.bytes_discarded} seq_gaps={gaps}")
+         f"bad_version={s.bad_version} bytes_discarded={s.bytes_discarded} "
+         f"seq_in_order={counts['in_order']} seq_gaps={counts['gap']} "
+         f"seq_missing={counts['missing']} seq_duplicates={counts['duplicate']} "
+         f"seq_reorders={counts['reorder']} silence={silence_events}")
     return decoder
 
 

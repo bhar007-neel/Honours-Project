@@ -15,6 +15,8 @@ BUILD    := build/aarch64le
 PROTOCOL := $(ROOT)/shared/protocol/edge_protocol.c
 RT_STATS := $(ROOT)/shared/common/rt_stats.c
 SIM      := $(ROOT)/shared/common/sensor_sim.c
+GATE     := $(ROOT)/shared/common/sensor_gate.c
+HEALTH   := $(ROOT)/shared/common/link_health.c
 
 APPS := qnx_sysinfo rt_threads msg_ipc edge_rx edge_tx
 BINS := $(addprefix $(BUILD)/,$(APPS))
@@ -25,7 +27,7 @@ all: $(BINS)
 $(BUILD)/qnx_sysinfo: src/qnx_sysinfo.c
 $(BUILD)/rt_threads:  src/rt_threads.c $(RT_STATS)
 $(BUILD)/msg_ipc:     src/msg_ipc.c
-$(BUILD)/edge_rx:     src/edge_rx.c $(PROTOCOL)
+$(BUILD)/edge_rx:     src/edge_rx.c $(PROTOCOL) $(GATE) $(HEALTH)
 $(BUILD)/edge_tx:     src/edge_tx.c $(PROTOCOL) $(SIM)
 
 $(BUILD)/edge_rx $(BUILD)/edge_tx: LDLIBS := -lsocket

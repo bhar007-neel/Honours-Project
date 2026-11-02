@@ -25,6 +25,56 @@ static const led_pin_t k_leds[] = {
 
 static TaskHandle_t volatile s_tx_waiter;
 
+/* One-producer (UART IRQ), one-consumer (the task in board_link_read). */
+#define BOARD_RX_CAP 256u
+static uint8_t s_rx_ring[BOARD_RX_CAP];
+static volatile uint16_t s_rx_head;
+static volatile uint16_t s_rx_tail;
+static TaskHandle_t volatile s_rx_waiter;
+static uint8_t s_rx_byte;
+static volatile bool s_rx_rearm;
+
+static void rx_push_from_isr(uint8_t byte, BaseType_t *woken)
+{
+    const uint16_t head = s_rx_head;
+    const uint16_t next = (uint16_t)((head + 1u) % BOARD_RX_CAP);
+    if (next == s_rx_tail) {
+        return; /* full: drop this byte; the decoder resyncs after the gap */
+    }
+    s_rx_ring[head] = byte;
+    s_rx_head = next;
+
+    TaskHandle_t waiter = s_rx_waiter;
+    if (waiter != NULL) {
+        vTaskNotifyGiveFromISR(waiter, woken);
+    }
+}
+
+static size_t rx_drain(uint8_t *out, size_t cap)
+{
+    size_t n = 0;
+    uint16_t tail = s_rx_tail;
+    while (n < cap && tail != s_rx_head) {
+        out[n] = s_rx_ring[tail];
+        n = n + 1u;
+        tail = (uint16_t)((tail + 1u) % BOARD_RX_CAP);
+    }
+    s_rx_tail = tail;
+    return n;
+}
+
+static void rx_arm(void)
+{
+    if (APP_LINK_UART_HANDLE.RxState != HAL_UART_STATE_READY) {
+        return;
+    }
+    if (HAL_UART_Receive_IT(&APP_LINK_UART_HANDLE, &s_rx_byte, 1) != HAL_OK) {
+        s_rx_rearm = true;
+    } else {
+        s_rx_rearm = false;
+    }
+}
+
 void board_init(void)
 {
 #if defined(DCB)
@@ -73,6 +123,32 @@ bool board_link_write(const uint8_t *data, size_t len, uint32_t timeout_ms)
     return done;
 }
 
+void board_link_rx_start(void)
+{
+    rx_arm();
+}
+
+size_t board_link_read(uint8_t *out, size_t cap, uint32_t timeout_ms)
+{
+    if (out == NULL || cap == 0u) {
+        return 0u;
+    }
+    if (s_rx_rearm) {
+        rx_arm();
+    }
+
+    /* The waiter is published before the drain so a byte that arrives
+     * between an empty drain and the wait is not lost. */
+    s_rx_waiter = xTaskGetCurrentTaskHandle();
+    size_t n = rx_drain(out, cap);
+    if (n == 0u && timeout_ms > 0u) {
+        (void)ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(timeout_ms));
+        n = rx_drain(out, cap);
+    }
+    s_rx_waiter = NULL;
+    return n;
+}
+
 uint32_t board_cycles(void)
 {
     return DWT->CYCCNT;
@@ -98,6 +174,30 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
         BaseType_t woken = pdFALSE;
         vTaskNotifyGiveFromISR(waiter, &woken);
         portYIELD_FROM_ISR(woken);
+    }
+}
+
+void HAL_UART_RxCpltCallback(UART_HandleTypeDef *huart)
+{
+    if (huart != &APP_LINK_UART_HANDLE) {
+        return;
+    }
+    BaseType_t woken = pdFALSE;
+    rx_push_from_isr(s_rx_byte, &woken);
+    if (HAL_UART_Receive_IT(huart, &s_rx_byte, 1) != HAL_OK) {
+        s_rx_rearm = true;
+    }
+    portYIELD_FROM_ISR(woken);
+}
+
+void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
+{
+    if (huart != &APP_LINK_UART_HANDLE) {
+        return;
+    }
+    /* Framing and overrun errors end the current reception. Arm the next byte. */
+    if (HAL_UART_Receive_IT(huart, &s_rx_byte, 1) != HAL_OK) {
+        s_rx_rearm = true;
     }
 }
 

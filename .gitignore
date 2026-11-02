@@ -52,6 +52,9 @@ compile_commands.json
 .settings/
 RemoteSystemsTempFiles/
 
+# Vendor trees fetched for the board build (HAL and FreeRTOS kernel)
+firmware/stm32/vendor/
+
 # Ada / Alire generated state
 alire/
 .alire/
