@@ -14,7 +14,7 @@ LDSCRIPT := $(CUBE)/Projects/NUCLEO-H563ZI/Templates/TrustZoneDisabled/STM32Cube
 
 CFLAGS := -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -std=c11 -Os -g \
           -ffunction-sections -fdata-sections -Wall -Wno-unused-parameter \
-          -DSTM32H563xx -DUSE_HAL_DRIVER
+          -DSTM32H563xx -DUSE_HAL_DRIVER -DAPP_OUTPUT_TEXT=0
 LDFLAGS := -mcpu=cortex-m33 -mthumb -mfloat-abi=soft -specs=nano.specs -specs=nosys.specs \
            -Wl,--gc-sections -T$(LDSCRIPT) -Wl,--defsym=_sstack=0x2009F000
 

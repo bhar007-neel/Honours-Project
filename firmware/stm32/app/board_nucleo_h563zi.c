@@ -9,6 +9,7 @@
 #include "app_config.h"
 
 extern UART_HandleTypeDef APP_LINK_UART_HANDLE;
+extern UART_HandleTypeDef hlpuart1;
 
 typedef struct {
     GPIO_TypeDef *port;
@@ -105,6 +106,9 @@ bool board_link_write(const uint8_t *data, size_t len, uint32_t timeout_ms)
     if (len == 0u || len > UINT16_MAX) {
         return false;
     }
+
+    /* D1/D0, the jumper wires to the Pi. The USB cable still gets the same bytes below. */
+    (void)HAL_UART_Transmit(&hlpuart1, (uint8_t *)data, (uint16_t)len, timeout_ms);
 
     /* Drop a completion that arrived after a previous timeout. */
     (void)ulTaskNotifyTake(pdTRUE, 0);

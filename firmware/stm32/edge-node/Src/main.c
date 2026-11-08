@@ -6,11 +6,13 @@
 #include "app.h"
 
 UART_HandleTypeDef huart3;
+UART_HandleTypeDef hlpuart1;
 
 static void SystemClock_Config(void);
 static void CACHE_Enable(void);
 static void MX_GPIO_Init(void);
 static void MX_USART3_UART_Init(void);
+static void MX_LPUART1_UART_Init(void);
 static void Error_Handler(void);
 
 /* HAL timebase is TIM6 so SysTick stays with FreeRTOS. */
@@ -36,6 +38,7 @@ int main(void)
     SystemClock_Config();
     MX_GPIO_Init();
     MX_USART3_UART_Init();
+    MX_LPUART1_UART_Init();
 
     app_init();
     vTaskStartScheduler();
@@ -103,6 +106,42 @@ static void MX_USART3_UART_Init(void)
     }
     HAL_NVIC_SetPriority(USART3_IRQn, 6, 0);
     HAL_NVIC_EnableIRQ(USART3_IRQn);
+}
+
+/* Arduino D1 (PB6) and D0 (PB7). This is the wire to the Pi, not the USB cable. */
+static void MX_LPUART1_UART_Init(void)
+{
+    GPIO_InitTypeDef gpio = {0};
+    RCC_PeriphCLKInitTypeDef clock = {0};
+
+    clock.PeriphClockSelection = RCC_PERIPHCLK_LPUART1;
+    clock.Lpuart1ClockSelection = RCC_LPUART1CLKSOURCE_PCLK3;
+    if (HAL_RCCEx_PeriphCLKConfig(&clock) != HAL_OK) {
+        Error_Handler();
+    }
+
+    gpio.Pin = GPIO_PIN_6 | GPIO_PIN_7;
+    gpio.Mode = GPIO_MODE_AF_PP;
+    gpio.Pull = GPIO_PULLUP;
+    gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+    gpio.Alternate = GPIO_AF8_LPUART1;
+    HAL_GPIO_Init(GPIOB, &gpio);
+
+    __HAL_RCC_LPUART1_CLK_ENABLE();
+    hlpuart1.Instance = LPUART1;
+    hlpuart1.Init.BaudRate = 115200;
+    hlpuart1.Init.WordLength = UART_WORDLENGTH_8B;
+    hlpuart1.Init.StopBits = UART_STOPBITS_1;
+    hlpuart1.Init.Parity = UART_PARITY_NONE;
+    hlpuart1.Init.Mode = UART_MODE_TX_RX;
+    hlpuart1.Init.HwFlowCtl = UART_HWCONTROL_NONE;
+    hlpuart1.Init.OverSampling = UART_OVERSAMPLING_16;
+    hlpuart1.Init.OneBitSampling = UART_ONE_BIT_SAMPLE_DISABLE;
+    hlpuart1.Init.ClockPrescaler = UART_PRESCALER_DIV1;
+    hlpuart1.AdvancedInit.AdvFeatureInit = UART_ADVFEATURE_NO_INIT;
+    if (HAL_UART_Init(&hlpuart1) != HAL_OK) {
+        Error_Handler();
+    }
 }
 
 static void SystemClock_Config(void)
